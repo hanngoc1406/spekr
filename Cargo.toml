@@ -1,0 +1,65 @@
+[package]
+name = "spekr"
+version = "0.1.0"
+edition = "2021"
+authors = ["Phan Đức <hanngoc1406@gmail.com>", "Spekr Contributors"]
+description = "A fast, modern acoustic spectrum analyser written in Rust"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/hanngoc1406/spekr"
+keywords = ["audio", "spectrum", "analyser", "spectrogram", "fft"]
+categories = ["multimedia::audio", "command-line-utilities", "gui"]
+
+[dependencies]
+# Audio decoding (Pure Rust, no external C/FFmpeg dependencies required)
+symphonia = { version = "0.5.4", features = ["all"] }
+
+# High-performance Fast Fourier Transform
+rustfft = "6.4"
+
+# Fast multi-threaded processing
+rayon = "1.10"
+
+# CLI Argument parsing
+clap = { version = "4.5", features = ["derive"] }
+
+# Image rendering and export
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+# GUI framework
+eframe = { version = "0.31", default-features = false, features = [
+    "default_fonts",
+    "glow",
+    "wayland",
+    "x11",
+] }
+
+# Native file dialogs for Open/Save
+rfd = "0.15"
+
+# Audio playback
+rodio = { version = "0.20", default-features = false }
+
+# Typography for crisp PNG rendering
+ab_glyph = "0.2"
+epaint_default_fonts = "0.31"
+unicode-normalization = "0.1"
+
+# Utilities
+anyhow = "1.0"
+log = "0.4"
+env_logger = "0.11"
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+
+# Optimize performance-critical dependencies in dev/debug builds for 10x faster audio processing
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
