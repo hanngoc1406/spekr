@@ -1,0 +1,178 @@
+name: Release Multiplatform Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS (Universal DMG & Binaries)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - name: Build Apple Silicon release binary
+        run: cargo build --release --target aarch64-apple-darwin
+
+      - name: Build Intel release binary
+        run: cargo build --release --target x86_64-apple-darwin
+
+      - name: Create Universal binary
+        run: |
+          mkdir -p target/universal
+          lipo -create -output target/universal/spekr target/aarch64-apple-darwin/release/spekr target/x86_64-apple-darwin/release/spekr
+          chmod +x target/universal/spekr
+
+      - name: Assemble Spekr.app bundle
+        run: |
+          mkdir -p target/dist/Spekr.app/Contents/MacOS
+          mkdir -p target/dist/Spekr.app/Contents/Resources
+          cp target/universal/spekr target/dist/Spekr.app/Contents/MacOS/spekr
+          cp assets/icon.icns target/dist/Spekr.app/Contents/Resources/icon.icns
+          cat << 'EOF' > target/dist/Spekr.app/Contents/Info.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key>
+              <string>Spekr</string>
+              <key>CFBundleDisplayName</key>
+              <string>Spekr</string>
+              <key>CFBundleIdentifier</key>
+              <string>cc.spekr.app</string>
+              <key>CFBundleVersion</key>
+              <string>0.1.0</string>
+              <key>CFBundleShortVersionString</key>
+              <string>0.1.0</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleSignature</key>
+              <string>????</string>
+              <key>CFBundleExecutable</key>
+              <string>spekr</string>
+              <key>CFBundleIconFile</key>
+              <string>icon.icns</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>NSSupportsAutomaticGraphicsSwitching</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Package Spekr-macos.dmg
+        run: |
+          mkdir -p target/dmg_root
+          cp -r target/dist/Spekr.app target/dmg_root/
+          ln -s /Applications target/dmg_root/Applications
+          hdiutil create -volname "Spekr" -srcfolder target/dmg_root -ov -format UDZO Spekr-macos.dmg
+
+      - name: Package standalone tarballs
+        run: |
+          tar -czvf spekr-macos-arm64.tar.gz -C target/aarch64-apple-darwin/release spekr
+          tar -czvf spekr-macos-x86_64.tar.gz -C target/x86_64-apple-darwin/release spekr
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: |
+            Spekr-macos.dmg
+            spekr-macos-arm64.tar.gz
+            spekr-macos-x86_64.tar.gz
+
+  build-windows:
+    name: Build Windows (Portable Zip & Exe)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build release binary
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Package Windows files
+        run: |
+          Copy-Item target/x86_64-pc-windows-msvc/release/spekr.exe Spekr-windows-x86_64.exe
+          mkdir target/win_pkg
+          Copy-Item target/x86_64-pc-windows-msvc/release/spekr.exe target/win_pkg/spekr.exe
+          Copy-Item README.md target/win_pkg/
+          Copy-Item LICENSE target/win_pkg/
+          Compress-Archive -Path target/win_pkg/* -DestinationPath Spekr-windows-x86_64.zip
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: |
+            Spekr-windows-x86_64.zip
+            Spekr-windows-x86_64.exe
+
+  build-linux:
+    name: Build Linux (x86_64 Binary)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libspeechd-dev libxkbcommon-dev libgl1-mesa-dev fonts-noto-cjk
+
+      - name: Build release binary
+        run: cargo build --release --target x86_64-unknown-linux-gnu
+
+      - name: Package Linux tarball
+        run: |
+          tar -czvf Spekr-linux-x86_64.tar.gz -C target/x86_64-unknown-linux-gnu/release spekr
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: Spekr-linux-x86_64.tar.gz
+
+  publish:
+    name: Publish GitHub Release
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: release_assets
+
+      - name: Publish GitHub Release with assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release_assets/Spekr-macos.dmg
+            release_assets/spekr-macos-arm64.tar.gz
+            release_assets/spekr-macos-x86_64.tar.gz
+            release_assets/Spekr-windows-x86_64.zip
+            release_assets/Spekr-windows-x86_64.exe
+            release_assets/Spekr-linux-x86_64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
